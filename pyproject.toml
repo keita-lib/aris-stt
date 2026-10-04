@@ -1,0 +1,30 @@
+[project]
+name = "aris-stt"
+version = "0.1.0"
+description = "Windows voice input: speak, see live captions, and the text is written at your cursor (local Whisper)."
+readme = "README.md"
+license = "CC-BY-ND-4.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Keita Nakamori / QUETTA ROBOTICS" }]
+requires-python = ">=3.11"
+dependencies = [
+    "faster-whisper>=1.1",
+    "sounddevice>=0.4",
+    "numpy",
+    "pystray>=0.19",
+    "pillow",
+]
+
+[project.optional-dependencies]
+# NVIDIA GPU で動かす場合（cuDNN は faster-whisper の依存 ctranslate2 に同梱されている）
+gpu = ["nvidia-cublas-cu12"]
+
+[project.gui-scripts]
+aris-stt = "aris_stt.app:main"
+
+[project.urls]
+Homepage = "https://github.com/keita-lib/aris-stt"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
