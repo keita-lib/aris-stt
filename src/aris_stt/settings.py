@@ -1,5 +1,6 @@
 """設定画面（トレイの「⚙ 設定...」から開く）：話し始め・確定のキーを、実際に押して登録する。"""
 
+import queue
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -81,14 +82,27 @@ class SettingsWindow(tk.Toplevel):
             return
         # 登録済みのキーを押しても録音が始まらないよう、読み取りの間はホットキーを外す
         self.hotkey_thread.post(winapi.WM_UNREG_MAIN)
-        self.capture = winapi.KeyCapture(lambda mods, vk: self.after(0, self.on_key, mods, vk))
-        if not self.capture.start():
+        # 押されたキーは読み取り用のスレッドからキューで受け取る（そのスレッドから tk に触ると落ちる）
+        self.pressed: queue.Queue = queue.Queue()
+        self.capture = winapi.KeyCapture(lambda mods, vk: self.pressed.put((mods, vk)))
+        if not self.capture.begin():
             self.capture = None
             self._restore_hotkeys()
             messagebox.showerror("ARIS STT", "キーを読み取れませんでした", parent=self)
             return
         self.add_btn.configure(state="disabled")
         self.hint.configure(text="登録したいキーを押してください（Ctrl・Alt などと組み合わせてもOK）。Esc で取り消し")
+        self.after(30, self._poll_capture)
+
+    def _poll_capture(self):
+        if self.capture is None:
+            return
+        try:
+            mods, vk = self.pressed.get_nowait()
+        except queue.Empty:
+            self.after(30, self._poll_capture)
+            return
+        self.on_key(mods, vk)
 
     def stop_capture(self):
         if self.capture is not None:

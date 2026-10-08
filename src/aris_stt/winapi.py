@@ -263,7 +263,7 @@ class HotkeyThread(threading.Thread):
 
 # ---- キーの読み取り（設定画面で「押したキーを登録する」ため） ----
 # IME がオンでも無変換などを確実に拾えるよう、低レベルのキーボードフックで受け取る
-WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 13, 0x0100, 0x0101, 0x0104, 0x0105
+WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_QUIT = 13, 0x0100, 0x0101, 0x0104, 0x0105, 0x0012
 # 修飾キーの仮想キー（左右・共通）→ 修飾フラグ
 _MOD_OF_VK = {0x11: MOD_CONTROL, 0xA2: MOD_CONTROL, 0xA3: MOD_CONTROL, 0x12: MOD_ALT, 0xA4: MOD_ALT, 0xA5: MOD_ALT,
               0x10: MOD_SHIFT, 0xA0: MOD_SHIFT, 0xA1: MOD_SHIFT, 0x5B: MOD_WIN, 0x5C: MOD_WIN}
@@ -284,15 +284,20 @@ user32.UnhookWindowsHookEx.argtypes = [wt.HHOOK]
 kernel32.GetModuleHandleW.restype = wt.HMODULE
 
 
-class KeyCapture:
+class KeyCapture(threading.Thread):
     """修飾キー以外のキーが押されたら、そのキーを他のアプリに渡さずに on_key(mods, vk) を呼ぶ。
-    フックを入れたスレッド（tk のメインループ）でメッセージが回っている必要がある"""
+    フックは専用スレッドに入れる。tk のスレッドに入れると、tk が GIL を手放してイベントを待っている最中に
+    フックの Python コードが割り込み、Fatal Python error（PyEval_RestoreThread）で落ちる。
+    on_key もこのスレッドから呼ばれるので、tk には触らずキューに置くだけにすること"""
 
     def __init__(self, on_key):
+        super().__init__(daemon=True)
         self.on_key = on_key
         self.hook = None
         self.down = set()  # 今押されている修飾キー
         self._proc = HOOKPROC(self._handle)  # 参照を保持しないと GC で消えて落ちる
+        self.thread_id = None
+        self.ready = threading.Event()
 
     def _handle(self, code, wparam, lparam):
         if code == 0:
@@ -310,12 +315,26 @@ class KeyCapture:
                 return 1  # 他のアプリには渡さない
         return user32.CallNextHookEx(self.hook, code, wparam, lparam)
 
-    def start(self) -> bool:
+    def run(self):
+        self.thread_id = kernel32.GetCurrentThreadId()
         self.hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, kernel32.GetModuleHandleW(None), 0)
+        self.ready.set()
+        if not self.hook:
+            return
+        # フックの呼び出しは、このスレッドのメッセージループの中で行われる
+        msg = wt.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            pass
+        user32.UnhookWindowsHookEx(self.hook)
+        self.hook = None
+
+    def begin(self) -> bool:
+        """読み取りを始める。フックを入れられなければ False"""
+        self.start()
+        self.ready.wait(2)
         return bool(self.hook)
 
     def stop(self) -> None:
-        if self.hook:
-            user32.UnhookWindowsHookEx(self.hook)
-            self.hook = None
+        if self.thread_id and self.is_alive():
+            user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
