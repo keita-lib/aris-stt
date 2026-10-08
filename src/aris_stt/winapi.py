@@ -42,6 +42,21 @@ def parse_hotkey(text: str):
     return mods, vk
 
 
+# 仮想キー → 設定ファイルに書く名前（"`" と "backquote" のような別名は先に書いた方を使う）
+VK_NAMES = {}
+for _name, _vk in KEY_NAMES.items():
+    VK_NAMES.setdefault(_vk, _name)
+
+
+def format_hotkey(mods: int, vk: int) -> str | None:
+    """(修飾キー, 仮想キー) を 'ctrl+alt+space' の形にする。設定で扱えないキーなら None"""
+    name = VK_NAMES.get(vk)
+    if name is None:
+        return None
+    parts = [n for n, m in (("ctrl", MOD_CONTROL), ("alt", MOD_ALT), ("shift", MOD_SHIFT), ("win", MOD_WIN)) if mods & m]
+    return "+".join(parts + [name.lower()])
+
+
 # ---- キー送信 ----
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [("wVk", wt.WORD), ("wScan", wt.WORD), ("dwFlags", wt.DWORD),
@@ -177,44 +192,130 @@ def single_instance(name: str) -> bool:
 
 
 # ---- ホットキー（専用スレッドでメッセージループを回す） ----
-HK_TOGGLE, HK_CANCEL_ESC, HK_CANCEL_SHIFT = 1, 2, 3
+# 録音開始・確定のキーは HK_TOGGLE + i、その Shift 版（取り消し）は HK_CANCEL_SHIFT + i で登録する（i は何番目のキーか）
+HK_CANCEL_ESC, HK_TOGGLE, HK_CANCEL_SHIFT = 1, 100, 200
 WM_REG_CANCEL, WM_UNREG_CANCEL, WM_REG_MAIN, WM_UNREG_MAIN = WM_USER + 1, WM_USER + 2, WM_USER + 3, WM_USER + 4
+WM_SET_KEYS = WM_USER + 5
 
 
 class HotkeyThread(threading.Thread):
-    def __init__(self, events: queue.Queue, mods: int, vk: int):
+    def __init__(self, events: queue.Queue, keys: list):
+        """keys: parse_hotkey の結果 (修飾キー, 仮想キー) のリスト"""
         super().__init__(daemon=True)
         self.events = events
-        self.mods, self.vk = mods, vk
+        self.keys = keys
+        self.new_keys = None  # set_keys で差し替える予定のキー
         self.thread_id = None
         self.ready = threading.Event()
 
-    def _register_main(self) -> bool:
-        return bool(user32.RegisterHotKey(None, HK_TOGGLE, self.mods | MOD_NOREPEAT, self.vk))
+    def _register_main(self) -> list:
+        """登録できなかったキーの番号を返す"""
+        return [i for i, (mods, vk) in enumerate(self.keys)
+                if not user32.RegisterHotKey(None, HK_TOGGLE + i, mods | MOD_NOREPEAT, vk)]
 
     def run(self):
         self.thread_id = kernel32.GetCurrentThreadId()
-        if not self._register_main():
+        failed = self._register_main()
+        if len(failed) == len(self.keys):
             self.events.put(("error", "ホットキーを登録できませんでした（他のアプリが使っている可能性があります）"))
+        elif failed:
+            self.events.put(("warn", f"一部のホットキーを登録できませんでした（{len(failed)}個）。他のキーは使えます"))
         self.ready.set()
         msg = wt.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             m = msg.message
             if m == WM_HOTKEY:
-                self.events.put(("toggle" if msg.wParam == HK_TOGGLE else "cancel", None))
+                is_toggle = HK_TOGGLE <= msg.wParam < HK_TOGGLE + len(self.keys)
+                self.events.put(("toggle" if is_toggle else "cancel", None))
             elif m == WM_REG_CANCEL:
                 # 取り消しキーは録音中だけ奪う（常時登録すると他アプリのEscが効かなくなる）
                 user32.RegisterHotKey(None, HK_CANCEL_ESC, MOD_NOREPEAT, VK_ESCAPE)
-                if not self.mods & MOD_SHIFT:
-                    user32.RegisterHotKey(None, HK_CANCEL_SHIFT, self.mods | MOD_SHIFT | MOD_NOREPEAT, self.vk)
+                for i, (mods, vk) in enumerate(self.keys):
+                    if not mods & MOD_SHIFT:
+                        user32.RegisterHotKey(None, HK_CANCEL_SHIFT + i, mods | MOD_SHIFT | MOD_NOREPEAT, vk)
             elif m == WM_UNREG_CANCEL:
                 user32.UnregisterHotKey(None, HK_CANCEL_ESC)
-                user32.UnregisterHotKey(None, HK_CANCEL_SHIFT)
+                for i in range(len(self.keys)):
+                    user32.UnregisterHotKey(None, HK_CANCEL_SHIFT + i)
             elif m == WM_REG_MAIN:
                 self._register_main()
             elif m == WM_UNREG_MAIN:
-                user32.UnregisterHotKey(None, HK_TOGGLE)
+                self._unregister_main()
+            elif m == WM_SET_KEYS:
+                # 設定画面で変えたキーに差し替える（再起動なしで反映）
+                self._unregister_main()
+                self.keys = self.new_keys
+                failed = self._register_main()
+                self.events.put(("hotkeys_applied", failed))
+
+    def _unregister_main(self) -> None:
+        for i in range(len(self.keys)):
+            user32.UnregisterHotKey(None, HK_TOGGLE + i)
+
+    def set_keys(self, keys: list) -> None:
+        self.new_keys = keys
+        self.post(WM_SET_KEYS)
 
     def post(self, message: int) -> None:
         self.ready.wait()
         user32.PostThreadMessageW(self.thread_id, message, 0, 0)
+
+
+# ---- キーの読み取り（設定画面で「押したキーを登録する」ため） ----
+# IME がオンでも無変換などを確実に拾えるよう、低レベルのキーボードフックで受け取る
+WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 13, 0x0100, 0x0101, 0x0104, 0x0105
+# 修飾キーの仮想キー（左右・共通）→ 修飾フラグ
+_MOD_OF_VK = {0x11: MOD_CONTROL, 0xA2: MOD_CONTROL, 0xA3: MOD_CONTROL, 0x12: MOD_ALT, 0xA4: MOD_ALT, 0xA5: MOD_ALT,
+              0x10: MOD_SHIFT, 0xA0: MOD_SHIFT, 0xA1: MOD_SHIFT, 0x5B: MOD_WIN, 0x5C: MOD_WIN}
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("vkCode", wt.DWORD), ("scanCode", wt.DWORD), ("flags", wt.DWORD),
+                ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+LRESULT = ctypes.c_ssize_t
+HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wt.WPARAM, wt.LPARAM)
+user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wt.HINSTANCE, wt.DWORD]
+user32.SetWindowsHookExW.restype = wt.HHOOK
+user32.CallNextHookEx.argtypes = [wt.HHOOK, ctypes.c_int, wt.WPARAM, wt.LPARAM]
+user32.CallNextHookEx.restype = LRESULT
+user32.UnhookWindowsHookEx.argtypes = [wt.HHOOK]
+kernel32.GetModuleHandleW.restype = wt.HMODULE
+
+
+class KeyCapture:
+    """修飾キー以外のキーが押されたら、そのキーを他のアプリに渡さずに on_key(mods, vk) を呼ぶ。
+    フックを入れたスレッド（tk のメインループ）でメッセージが回っている必要がある"""
+
+    def __init__(self, on_key):
+        self.on_key = on_key
+        self.hook = None
+        self.down = set()  # 今押されている修飾キー
+        self._proc = HOOKPROC(self._handle)  # 参照を保持しないと GC で消えて落ちる
+
+    def _handle(self, code, wparam, lparam):
+        if code == 0:
+            vk = ctypes.cast(lparam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents.vkCode
+            pressed = wparam in (WM_KEYDOWN, WM_SYSKEYDOWN)
+            # 修飾キーの状態は、フックが見た上げ下げから自分で数える
+            # （GetAsyncKeyState はフックの中だと直前のキーの状態が残っていることがある）
+            if vk in _MOD_OF_VK:
+                (self.down.add if pressed else self.down.discard)(vk)
+            elif pressed:
+                mods = 0
+                for d in self.down:
+                    mods |= _MOD_OF_VK[d]
+                self.on_key(mods, vk)
+                return 1  # 他のアプリには渡さない
+        return user32.CallNextHookEx(self.hook, code, wparam, lparam)
+
+    def start(self) -> bool:
+        self.hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, kernel32.GetModuleHandleW(None), 0)
+        return bool(self.hook)
+
+    def stop(self) -> None:
+        if self.hook:
+            user32.UnhookWindowsHookEx(self.hook)
+            self.hook = None
+

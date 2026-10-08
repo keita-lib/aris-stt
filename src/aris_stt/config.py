@@ -1,7 +1,8 @@
 """設定ファイル（%APPDATA%\\aris-stt\\config.toml）の読み込み。無ければ既定値で作る。"""
 
-import ctypes
+import json
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 
@@ -14,20 +15,17 @@ LOG_PATH = os.path.join(LOG_DIR, "aris-stt.log")
 DEFAULT_TERMINAL_APPS = ["code.exe", "cursor.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe"]
 
 
-def _is_japanese_keyboard() -> bool:
-    try:
-        return ctypes.windll.user32.GetKeyboardType(0) == 7
-    except Exception:
-        return False
+# 既定のキー。日本語キーボードの無変換と、無変換の無いキーボード（英語配列など）でも押せる Ctrl+Alt+Space の両方
+DEFAULT_HOTKEYS = ["muhenkan", "ctrl+alt+space"]
 
 
 def _default_text() -> str:
-    hotkey = "muhenkan" if _is_japanese_keyboard() else "ctrl+alt+space"
     return f'''# ARIS STT の設定。変更したら、トレイのメニューから「再起動」を選ぶと反映される。
 
 # 録音開始・確定のキー。単独キー（muhenkan, henkan, f1〜f24, pause, scroll_lock など）か、
-# 修飾キー付き（ctrl+alt+space, alt+q など）。取り消しは「shift+このキー」または Esc。
-hotkey = "{hotkey}"
+# 修飾キー付き（ctrl+alt+space, alt+q など）。["muhenkan", "f9"] のように複数並べると、どれでも使える。
+# 取り消しは「shift+このキー」または Esc。
+hotkey = {DEFAULT_HOTKEYS!r}
 
 # 認識する言語（ja, en など）
 language = "ja"
@@ -51,13 +49,33 @@ terminal_apps = {DEFAULT_TERMINAL_APPS!r}
 
 @dataclass
 class Config:
-    hotkey: str = "muhenkan"
+    hotkey: str | list = field(default_factory=lambda: list(DEFAULT_HOTKEYS))  # 1つなら文字列、複数ならリスト
     language: str = "ja"
     model: str = "auto"
     device: str = "auto"
     initial_prompt: str = ""
     partial_interval: float = 0.6
     terminal_apps: list = field(default_factory=lambda: list(DEFAULT_TERMINAL_APPS))
+
+    @property
+    def hotkeys(self) -> list:
+        return [self.hotkey] if isinstance(self.hotkey, str) else list(self.hotkey)
+
+    @property
+    def hotkey_label(self) -> str:
+        """画面に出す表記（例: muhenkan / ctrl+alt+space）"""
+        return " / ".join(self.hotkeys)
+
+
+def save_hotkeys(hotkeys: list) -> None:
+    """設定ファイルの hotkey の行だけを書き換える（他の行やコメントはそのまま残す）"""
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        text = f.read()
+    line = "hotkey = " + json.dumps(hotkeys, ensure_ascii=False)
+    pattern = re.compile(r"^hotkey\s*=.*$", re.MULTILINE)
+    text = pattern.sub(lambda m: line, text, count=1) if pattern.search(text) else line + "\n" + text
+    with open(CONFIG_PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
 
 
 def load() -> Config:

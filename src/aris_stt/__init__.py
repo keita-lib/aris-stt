@@ -4,4 +4,4 @@ Copyright (c) 2026 Keita Nakamori / QUETTA ROBOTICS
 Licensed under CC BY-ND 4.0 (https://creativecommons.org/licenses/by-nd/4.0/)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

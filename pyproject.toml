@@ -1,6 +1,6 @@
 [project]
 name = "aris-stt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Windows voice input: speak, see live captions, and the text is written at your cursor (local Whisper)."
 readme = "README.md"
 license = "CC-BY-ND-4.0"

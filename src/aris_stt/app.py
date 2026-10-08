@@ -14,7 +14,7 @@ import winsound
 import numpy as np
 import sounddevice as sd
 
-from . import __version__, config, winapi
+from . import __version__, config, settings, winapi
 
 SAMPLE_RATE = 16000
 PARTIAL_WINDOW_SEC = 30  # 途中経過は直近この秒数だけを読む（長い発話で重くならないように）
@@ -188,7 +188,8 @@ def start_tray(events: queue.Queue):
 
     menu = pystray.Menu(
         pystray.MenuItem("有効", toggle_enabled, checked=lambda item: state["enabled"]),
-        pystray.MenuItem("設定ファイルを開く", lambda: os.startfile(config.CONFIG_PATH)),
+        pystray.MenuItem("⚙ 設定...", lambda: events.put(("settings", None)), default=True),
+        pystray.MenuItem("設定ファイルを開く（詳しい設定）", lambda: os.startfile(config.CONFIG_PATH)),
         pystray.MenuItem("ログを開く", lambda: os.startfile(config.LOG_PATH)),
         pystray.MenuItem("ログオン時に自動起動", toggle_autostart, checked=lambda item: autostart_enabled()),
         pystray.MenuItem("再起動（設定を反映）", lambda: events.put(("restart", None))),
@@ -204,8 +205,7 @@ class App:
     def __init__(self, cfg: config.Config):
         self.cfg = cfg
         self.events: queue.Queue = queue.Queue()
-        mods, vk = winapi.parse_hotkey(cfg.hotkey)
-        self.hotkeys = winapi.HotkeyThread(self.events, mods, vk)
+        self.hotkeys = winapi.HotkeyThread(self.events, [winapi.parse_hotkey(k) for k in cfg.hotkeys])
         self.worker = Transcriber(cfg, self.events)
         self.recorder = Recorder()
         self.state = "loading"  # loading / idle / recording / finalizing / disabled
@@ -213,6 +213,7 @@ class App:
         self.last_partial = 0.0
         self.target_hwnd = None
         self.tray = None
+        self.settings_window = None
 
         self.root = tk.Tk()
         self.root.overrideredirect(True)
@@ -261,7 +262,7 @@ class App:
         self.state = "recording"
         self.hotkeys.post(winapi.WM_REG_CANCEL)
         winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS | winsound.SND_ASYNC)
-        self.show(f"● 録音中　{self.cfg.hotkey} で確定 / Esc で取り消し")
+        self.show(f"● 録音中　{self.cfg.hotkey_label} で確定 / Esc で取り消し")
 
     def finish_recording(self):
         audio = self.recorder.stop()
@@ -290,6 +291,21 @@ class App:
         method = winapi.paste_text(text, exe, self.cfg.terminal_apps)
         log(f"[確定] {text}  → {exe or '?'} ({method})")
 
+    def open_settings(self):
+        if self.settings_window is not None and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            self.settings_window.focus_force()
+            return
+        if self.state == "recording":
+            self.cancel_recording()
+        self.settings_window = settings.SettingsWindow(
+            self.root, self.cfg.hotkeys, self.apply_hotkeys, self.hotkeys, lambda: self.state != "disabled")
+
+    def apply_hotkeys(self, hotkeys: list):
+        config.save_hotkeys(hotkeys)
+        self.cfg.hotkey = list(hotkeys)
+        self.hotkeys.set_keys([winapi.parse_hotkey(k) for k in hotkeys])
+
     def quit(self, restart=False):
         if self.tray:
             self.tray.stop()
@@ -304,13 +320,27 @@ class App:
                 if name == "ready":
                     self.state = "idle"
                     log(payload)
-                    self.flash(f"ARIS STT 準備完了　{self.cfg.hotkey} で話す", payload)
+                    self.flash(f"ARIS STT 準備完了　{self.cfg.hotkey_label} で話す", payload)
                 elif name == "status":
                     log(payload)
                     self.show("ARIS STT 起動中…", payload)
+                elif name == "warn":
+                    log(payload)
+                    self.flash("ARIS STT", payload, ms=4000)
                 elif name in ("error", "fatal"):
                     log(payload)
                     self.show(f"ARIS STT エラー（ログ: {config.LOG_PATH}）", payload)
+                elif name == "settings":
+                    self.open_settings()
+                elif name == "hotkeys_applied":
+                    failed = [self.cfg.hotkeys[i] for i in payload]
+                    if failed:
+                        msg = f"このキーは他のアプリが使っていて登録できませんでした: {', '.join(failed)}"
+                        log(msg)
+                        self.flash("ARIS STT", msg, ms=5000)
+                    else:
+                        log(f"ホットキーを変更: {self.cfg.hotkey_label}")
+                        self.flash(f"ARIS STT　{self.cfg.hotkey_label} で話す", "キーの設定を反映しました")
                 elif name == "quit":
                     return self.quit()
                 elif name == "restart":
@@ -324,7 +354,7 @@ class App:
                 elif name == "enable" and self.state == "disabled":
                     self.hotkeys.post(winapi.WM_REG_MAIN)
                     self.state = "idle"
-                    self.flash(f"ARIS STT 有効　{self.cfg.hotkey} で話す")
+                    self.flash(f"ARIS STT 有効　{self.cfg.hotkey_label} で話す")
                 elif name == "toggle":
                     if self.state == "idle":
                         self.start_recording()
@@ -384,5 +414,5 @@ def main():
     except Exception as e:
         log(f"設定ファイルを読めませんでした（{config.CONFIG_PATH}）: {e}")
         raise
-    log(f"ARIS STT {__version__} 起動（hotkey={cfg.hotkey}, model={cfg.model}, device={cfg.device}）")
+    log(f"ARIS STT {__version__} 起動（hotkey={cfg.hotkey_label}, model={cfg.model}, device={cfg.device}）")
     App(cfg).run()

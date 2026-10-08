@@ -27,7 +27,8 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object Comma
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 Write-Host "ARIS STT をインストールしています（数分かかることがあります）..."
-uv tool install --python 3.12 --force $spec
+# 同じバージョン番号のまま中身が変わった場合も、キャッシュを使わず本体を作り直す
+uv tool install --python 3.12 --force --reinstall-package aris-stt $spec
 if ($LASTEXITCODE -ne 0) { throw "インストールに失敗しました" }
 
 $bin = (uv tool dir --bin).Trim()
@@ -53,6 +54,7 @@ Write-Host ""
 Write-Host "インストールが完了しました。" -ForegroundColor Green
 Write-Host "・画面右下のタスクトレイにマイクのアイコンが出ます（設定・一時停止・終了はここから）"
 Write-Host "・初回はモデルのダウンロードがあります（GPU 版 約3GB / CPU 版 約0.5GB）"
-Write-Host "・日本語キーボードは「無変換」、それ以外は Ctrl+Alt+Space で話し始め、もう一度押すと書き込みます"
-Write-Host "・設定: $env:APPDATA\aris-stt\config.toml"
+Write-Host "・「無変換」または Ctrl+Alt+Space で話し始め、もう一度押すと書き込みます"
+Write-Host "・キーの変更: トレイのマイクのアイコン →「⚙ 設定...」"
+Write-Host "・詳しい設定: $env:APPDATA\aris-stt\config.toml"
 Write-Host "・アンインストール: irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/uninstall.ps1 | iex"

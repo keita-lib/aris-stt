@@ -42,18 +42,28 @@ irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/install.ps1 | iex
 
 | 操作 | キー |
 |---|---|
-| 話し始める / 確定して書き込む | **無変換**（日本語キーボード） / **Ctrl+Alt+Space**（それ以外） |
+| 話し始める / 確定して書き込む | **無変換** または **Ctrl+Alt+Space**（どちらでも。設定画面で変えられます） |
 | 取り消す（録音中のみ） | Shift+上のキー、または Esc |
 
-タスクトレイのマイクのアイコンから、一時停止・設定ファイルを開く・再起動・終了ができます。
+タスクトレイのマイクのアイコンから、一時停止・設定・再起動・終了ができます。
 
-### 設定
+### キーを変える（設定画面）
+
+タスクトレイのマイクのアイコンを右クリックして「⚙ 設定...」を選びます（アイコンをクリックしても開きます）。
+
+1. 「キーを追加...」を押して、使いたいキーを実際に押します（Ctrl・Alt・Shift・Win との組み合わせもできます）
+2. いらないキーは一覧で選んで「削除」します
+3. 「保存」を押すと、その場で反映されます（再起動は要りません）
+
+キーはいくつでも登録できて、どれを押しても使えます。日本語キーボードと英語キーボードを付け替えて使う場合は、両方で押せるキーを登録しておくと便利です。
+
+### 詳しい設定（設定ファイル）
 
 `%APPDATA%\aris-stt\config.toml` を編集し、トレイのメニューから「再起動（設定を反映）」を選びます。
 
 | 項目 | 内容 |
 |---|---|
-| `hotkey` | 話し始め・確定のキー（`muhenkan`、`f9`、`ctrl+alt+space`、`alt+q` など） |
+| `hotkey` | 話し始め・確定のキー（`muhenkan`、`f9`、`ctrl+alt+space`、`alt+q` など）。`["muhenkan", "f9"]` のように複数並べられます |
 | `language` | 認識する言語（`ja`、`en` など） |
 | `model` | `auto` / `tiny` / `base` / `small` / `medium` / `large-v3` / `large-v3-turbo` |
 | `device` | `auto` / `cuda` / `cpu` |
@@ -107,7 +117,7 @@ irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/uninstall.ps1 | ie
 irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/install.ps1 | iex
 ```
 
-**Use**: press **Muhenkan** (Japanese keyboards) or **Ctrl+Alt+Space** (others) to start and again to write the text. Shift+that key or Esc cancels. Settings: `%APPDATA%\aris-stt\config.toml`.
+**Use**: press **Muhenkan** or **Ctrl+Alt+Space** to start and again to write the text. Shift+that key or Esc cancels. To change the keys, open the tray icon menu → "⚙ 設定..." (Settings) and press the key you want; several keys can be registered. Other settings: `%APPDATA%\aris-stt\config.toml`.
 
 **Uninstall**:
 
