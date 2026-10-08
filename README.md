@@ -16,7 +16,7 @@
 1. [Releases](https://github.com/keita-lib/aris-stt/releases/latest) から zip をダウンロードします
    - NVIDIA の GPU がある PC：`aris-stt-<version>-windows-gpu.zip`（約630MB）
    - それ以外の PC：`aris-stt-<version>-windows-cpu.zip`（約100MB）
-2. 好きな場所に展開して、`aris-sttris-stt.exe` をダブルクリックします
+2. 好きな場所に展開して、`aris-stt\aris-stt.exe` をダブルクリックします
 3. ログオン時に自動で起動したい場合は、タスクトレイのマイクのアイコンを右クリックして「ログオン時に自動起動」にチェックを入れます
 
 署名の無い exe のため、初回は Windows の「PC が保護されました」という警告が出ることがあります。「詳細情報」→「実行」で起動できます。
@@ -37,6 +37,22 @@ irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/install.ps1 | iex
 4. ARIS STT を起動する
 
 初回の起動時に音声認識モデルをダウンロードします（GPU 版 約3GB / CPU 版 約0.5GB）。
+
+## はじめての使い方（インストールしたら）
+
+1. 画面右下のタスクトレイに、マイクのアイコンが出ます（見当たらないときは「^」を押して隠れたアイコンを開きます）
+2. 画面下に「ARIS STT 準備完了」と出たら使えます。初回はモデルのダウンロードがあるので、数分かかることがあります
+3. 文字を書き込みたい場所（メモ帳、ブラウザの入力欄、チャットなど）をクリックして、カーソルを置きます
+4. **無変換**（または **Ctrl+Alt+Space**）を押すと「ポン」と鳴って録音が始まります。そのまま話してください。画面下の字幕に、認識の途中経過が出ます
+5. 話し終わったら、もう一度同じキー（登録したキーならどれでも）を押します。少しして、話した内容がカーソルの位置に書き込まれます
+
+やめたいときは、録音中に **Esc** を押すと、何も書き込まずに取り消せます。
+
+うまく認識させるコツ：
+
+- 一文ずつではなく、言いたいことをまとめて話しても大丈夫です。句読点も自動で付きます
+- よく使う固有名詞や専門用語は、設定ファイルの `initial_prompt` に並べておくと、正しく書かれやすくなります
+- 使わないときは、トレイのメニューの「有効」のチェックを外すと一時停止できます（キーが本来の働きに戻ります）
 
 ## 使い方
 
@@ -75,6 +91,22 @@ irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/install.ps1 | iex
 - 書き込みはクリップボード経由です。書き込むたびに、クリップボードの内容は認識した文で上書きされます
 - 割り当てたキー（無変換など）の本来の働きは、ARIS STT の動作中は使えません
 - ログ：`%LOCALAPPDATA%\aris-stt\aris-stt.log`
+
+### 困ったとき
+
+| 症状 | 対処 |
+|---|---|
+| キーを押しても録音が始まらない | 他のアプリが同じキーを使っている可能性があります。「⚙ 設定...」で別のキー（F9 や Ctrl+Alt+Space など）を追加してください |
+| 書き込まれない（ターミナルなど） | Ctrl+V で貼り付けできないアプリは、設定ファイルの `terminal_apps` に実行ファイル名を足すと Shift+Insert で貼り付けます |
+| 認識が遅い | GPU の無い PC では、設定ファイルの `model` を `base` や `tiny` にすると速くなります（精度は下がります） |
+| 起動しない・すぐ終わる | ログ（上記）の最後のほうにエラーの内容が書かれています |
+
+## 新しい版にする
+
+- exe 版：トレイから終了し、[Releases](https://github.com/keita-lib/aris-stt/releases/latest) から新しい zip をダウンロードして、前のフォルダと入れ替えます
+- コマンドで入れた場合：インストールと同じ1行をもう一度実行します
+
+どちらも、設定（キーの登録など）はそのまま引き継がれます。
 
 ## アンインストール
 
@@ -117,7 +149,11 @@ irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/uninstall.ps1 | ie
 irm https://raw.githubusercontent.com/keita-lib/aris-stt/main/install.ps1 | iex
 ```
 
+**First use**: a microphone icon appears in the system tray. When "ARIS STT 準備完了" (ready) shows at the bottom of the screen, click where you want to type, press the key, speak, and press it again. The first launch downloads the speech model and may take a few minutes.
+
 **Use**: press **Muhenkan** or **Ctrl+Alt+Space** to start and again to write the text. Shift+that key or Esc cancels. To change the keys, open the tray icon menu → "⚙ 設定..." (Settings) and press the key you want; several keys can be registered. Other settings: `%APPDATA%\aris-stt\config.toml`.
+
+**Update**: download the new zip and replace the old folder, or run the install line again. Your settings are kept.
 
 **Uninstall**:
 
